@@ -47,7 +47,7 @@ A production-grade social feed and limited-inventory reservation platform built 
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/YOUR_USERNAME/pulsex.git](https://github.com/YOUR_USERNAME/pulsex.git)
+   git clone https://github.com/HelloAwasthi/pulsex-highscalable-website.git
    cd pulsex
    ```
 
@@ -68,5 +68,5 @@ A production-grade social feed and limited-inventory reservation platform built 
    ```bash
    uvicorn app.main:app --reload
    ```
-   - **Live App UI:** `http://localhost:8000/`
-   - **Interactive Swagger API Docs:** `http://localhost:8000/docs`
+   - **Live App UI:** `https://pulsex-highscalable-website.onrender.com/`
+   
