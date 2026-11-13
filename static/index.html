@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PulseX — High-Concurrency Social Feed</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background-color: #090612;
+      background-image: radial-gradient(circle at 15% 15%, rgba(139, 92, 246, 0.14), transparent 35%),
+                        radial-gradient(circle at 85% 80%, rgba(217, 70, 239, 0.12), transparent 35%);
+    }
+    .glass-card {
+      background: rgba(20, 14, 36, 0.78);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(168, 85, 247, 0.22);
+    }
+    .ig-gradient {
+      background: linear-gradient(135deg, #7c3aed 0%, #c026d3 55%, #ec4899 100%);
+    }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen font-sans antialiased">
+
+  <!-- Top Navbar -->
+  <header class="sticky top-0 z-30 glass-card border-b border-purple-500/20">
+    <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl ig-gradient flex items-center justify-center font-extrabold text-lg shadow-lg shadow-purple-600/30">
+          P
+        </div>
+        <div>
+          <h1 class="font-bold text-lg tracking-tight bg-gradient-to-r from-purple-400 via-fuchsia-400 to-pink-400 bg-clip-text text-transparent">
+            PulseX
+          </h1>
+          <p class="text-[11px] text-purple-300/70">Ranked by Most Liked • Powered by FastAPI + Redis</p>
+        </div>
+      </div>
+
+      <!-- Auth Controls -->
+      <div id="authSection" class="flex items-center space-x-3"></div>
+    </div>
+
+    <!-- Live Redis Telemetry Bar -->
+    <div class="bg-purple-950/50 border-t border-purple-500/20 px-4 py-1.5 text-xs">
+      <div class="max-w-2xl mx-auto flex items-center justify-between">
+        <span>Feed Engine: <strong id="cacheBadge" class="text-fuchsia-400 font-mono">Checking...</strong></span>
+        <button type="button" onclick="loadFeed()" class="text-purple-300 hover:text-white underline">Refresh Feed</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-2xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- Toast Alert Banner -->
+    <div id="toast" class="hidden p-3 rounded-xl text-sm font-medium border"></div>
+
+    <!-- Login / Register Card (Shown when logged out) -->
+    <section id="loginCard" class="glass-card rounded-2xl p-6 shadow-xl">
+      <h2 class="text-lg font-bold text-purple-200 mb-1">Join the Pulse</h2>
+      <p class="text-xs text-gray-400 mb-4">Create an account or log in to post thoughts, like posts, and claim limited Spotlight Boosts.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+        <input id="usernameInput" type="text" placeholder="Username (e.g. akshat)"
+          class="bg-black/40 border border-purple-500/30 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-fuchsia-500" />
+        <input id="passwordInput" type="password" placeholder="Password (min 6 chars)"
+          class="bg-black/40 border border-purple-500/30 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-fuchsia-500" />
+      </div>
+      <div class="flex space-x-3">
+        <button type="button" onclick="handleAuth('login')"
+          class="flex-1 ig-gradient hover:opacity-95 text-white font-semibold py-2.5 rounded-xl text-sm transition shadow-lg shadow-fuchsia-600/25">
+          Log In
+        </button>
+        <button type="button" onclick="handleAuth('register')"
+          class="flex-1 bg-purple-900/50 hover:bg-purple-800/60 border border-purple-400/30 text-purple-200 font-semibold py-2.5 rounded-xl text-sm transition">
+          Create Account
+        </button>
+      </div>
+    </section>
+
+    <!-- Compose Post Box (Shown when logged in) -->
+    <section id="composeCard" class="hidden glass-card rounded-2xl p-5 shadow-xl">
+      <textarea id="postContent" rows="3" maxlength="280"
+        placeholder="What's on your mind? Most-liked thoughts rise to the top..."
+        class="w-full bg-black/35 border border-purple-500/25 rounded-xl p-3.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-fuchsia-500 resize-none"></textarea>
+      <div class="flex items-center justify-between mt-3">
+        <span class="text-xs text-purple-300/60">Max 280 chars • Auto-invalidates Redis Feed Cache</span>
+        <button type="button" onclick="createPost()"
+          class="ig-gradient px-5 py-2 rounded-xl text-sm font-semibold text-white shadow-lg shadow-purple-600/30 hover:opacity-95 transition">
+          Post Pulse
+        </button>
+      </div>
+    </section>
+
+    <!-- Feed Header -->
+    <div class="flex items-center justify-between pt-2">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-purple-300/80">
+        🔥 Top Liked Thoughts
+      </h3>
+      <span class="text-xs text-gray-500">Sorted by Likes DESC</span>
+    </div>
+
+    <!-- Posts Feed List -->
+    <div id="feedContainer" class="space-y-4"></div>
+  </main>
+
+  <script>
+    function getToken() {
+      return localStorage.getItem("pulsex_token");
+    }
+
+    function getUsername() {
+      return localStorage.getItem("pulsex_user");
+    }
+
+    function showToast(msg, isError) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      if (isError) {
+        el.className = "p-3.5 rounded-xl text-sm font-medium border bg-red-950/70 border-red-500/50 text-red-200";
+      } else {
+        el.className = "p-3.5 rounded-xl text-sm font-medium border bg-purple-950/70 border-fuchsia-500/50 text-purple-200";
+      }
+      el.classList.remove("hidden");
+      setTimeout(function () {
+        el.classList.add("hidden");
+      }, 4000);
+    }
+
+    function updateAuthUI() {
+      const token = getToken();
+      const user = getUsername();
+      const authSection = document.getElementById("authSection");
+      const loginCard = document.getElementById("loginCard");
+      const composeCard = document.getElementById("composeCard");
+
+      if (token && user) {
+        loginCard.classList.add("hidden");
+        composeCard.classList.remove("hidden");
+        authSection.innerHTML =
+          '<span class="text-xs text-purple-200 bg-purple-900/50 px-3 py-1.5 rounded-lg border border-purple-500/30">@' +
+          escapeHtml(user) +
+          '</span>' +
+          '<button type="button" onclick="logout()" class="text-xs text-pink-400 hover:text-pink-300 font-semibold">Logout (Revoke JWT)</button>';
+      } else {
+        loginCard.classList.remove("hidden");
+        composeCard.classList.add("hidden");
+        authSection.innerHTML = '<span class="text-xs text-gray-400">Guest Mode</span>';
+      }
+    }
+
+    async function handleAuth(mode) {
+      const username = document.getElementById("usernameInput").value.trim();
+      const password = document.getElementById("passwordInput").value.trim();
+      if (!username || !password) {
+        return showToast("Enter both username and password", true);
+      }
+
+      const res = await fetch("/api/auth/" + mode, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username, password: password })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return showToast(data.detail || "Authentication failed", true);
+      }
+
+      localStorage.setItem("pulsex_token", data.access_token);
+      localStorage.setItem("pulsex_user", data.username);
+      updateAuthUI();
+      loadFeed();
+      showToast("Welcome @" + data.username + "! JWT stored.");
+    }
+
+    async function logout() {
+      const token = getToken();
+      if (token) {
+        await fetch("/api/auth/logout", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + token }
+        });
+      }
+      localStorage.removeItem("pulsex_token");
+      localStorage.removeItem("pulsex_user");
+      updateAuthUI();
+      loadFeed();
+      showToast("Logged out! Your JWT jti is now blacklisted in Redis.", false);
+    }
+
+    async function createPost() {
+      const content = document.getElementById("postContent").value.trim();
+      if (!content) return;
+
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + getToken()
+        },
+        body: JSON.stringify({ content: content })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return showToast(data.detail || "Could not create post", true);
+      }
+
+      document.getElementById("postContent").value = "";
+      loadFeed();
+      showToast("Pulse published & Redis cache invalidated!", false);
+    }
+
+    async function toggleLike(postId) {
+      if (!getToken()) {
+        return showToast("Log in first to like posts!", true);
+      }
+      const res = await fetch("/api/posts/" + postId + "/like", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + getToken() }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return showToast(data.detail || "Error liking post", true);
+      }
+      loadFeed();
+    }
+
+    async function claimSpotlight(postId) {
+      if (!getToken()) {
+        return showToast("Log in first to claim a Spotlight Boost!", true);
+      }
+      const res = await fetch("/api/posts/" + postId + "/spotlight", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + getToken() }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return showToast(data.detail || "Could not claim Spotlight", true);
+      }
+      showToast(data.message, false);
+      loadFeed();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function renderPostCard(post, idx) {
+      const rankNum = idx + 1;
+      const timeStr = new Date(post.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+      const likeBtnClass = post.liked_by_me
+        ? "bg-pink-600/30 text-pink-300 border border-pink-500/40"
+        : "bg-white/5 text-gray-300 hover:bg-purple-900/40";
+      const heartIcon = post.liked_by_me ? "💜" : "🤍";
+
+      let spotlightBtnClass = "bg-gray-800 text-gray-500 cursor-not-allowed";
+      let spotlightLabel = "⚡ Sold Out (0/5)";
+      let isDisabled = true;
+
+      if (post.spotlighted_by_me) {
+        spotlightBtnClass = "bg-purple-700/40 text-purple-200 border border-purple-400/40 cursor-default";
+        spotlightLabel = "⚡ Boosted (+5)";
+      } else if (post.spotlight_slots_left !== 0) {
+        spotlightBtnClass = "ig-gradient text-white shadow-md shadow-purple-600/20 hover:opacity-90";
+        spotlightLabel = "⚡ Spotlight Boost (" + post.spotlight_slots_left + "/5 left)";
+        isDisabled = false;
+      }
+
+      const disabledAttr = isDisabled ? "disabled" : "";
+
+      return (
+        '<article class="glass-card rounded-2xl p-5 transition hover:border-purple-400/40">' +
+          '<div class="flex items-center justify-between mb-2">' +
+            '<div class="flex items-center space-x-2">' +
+              '<span class="text-xs font-bold px-2 py-0.5 rounded-md bg-purple-900/70 text-purple-300 border border-purple-500/30">#' + rankNum + '</span>' +
+              '<span class="font-bold text-sm text-purple-200">@' + escapeHtml(post.author_username) + '</span>' +
+            '</div>' +
+            '<span class="text-xs text-gray-500">' + timeStr + '</span>' +
+          '</div>' +
+          '<p class="text-gray-100 text-[15px] leading-relaxed my-3 break-words">' + escapeHtml(post.content) + '</p>' +
+          '<div class="flex items-center justify-between pt-3 border-t border-purple-500/15 text-xs">' +
+            '<button type="button" onclick="toggleLike(' + post.id + ')" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-semibold transition ' + likeBtnClass + '">' +
+              '<span>' + heartIcon + '</span>' +
+              '<span>' + post.likes_count + ' Likes</span>' +
+            '</button>' +
+            '<button type="button" onclick="claimSpotlight(' + post.id + ')" ' + disabledAttr + ' class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-semibold transition ' + spotlightBtnClass + '">' +
+              '<span>' + spotlightLabel + '</span>' +
+            '</button>' +
+          '</div>' +
+        '</article>'
+      );
+    }
+
+    async function loadFeed() {
+      const headers = {};
+      if (getToken()) {
+        headers["Authorization"] = "Bearer " + getToken();
+      }
+
+      const res = await fetch("/api/posts", { headers: headers });
+      const data = await res.json();
+      if (!res.ok) {
+        return showToast(data.detail || "Failed to load feed", true);
+      }
+
+      document.getElementById("cacheBadge").textContent = data.source;
+      const container = document.getElementById("feedContainer");
+
+      if (!data.posts || data.posts.length === 0) {
+        container.innerHTML = '<div class="glass-card rounded-2xl p-8 text-center text-gray-400 text-sm">No thoughts posted yet. Be the first!</div>';
+        return;
+      }
+
+      const cardsHtml = [];
+      for (let i = 0; i !== data.posts.length; i++) {
+        cardsHtml.push(renderPostCard(data.posts[i], i));
+      }
+      container.innerHTML = cardsHtml.join("");
+    }
+
+    updateAuthUI();
+    loadFeed();
+  </script>
+</body>
+</html>
